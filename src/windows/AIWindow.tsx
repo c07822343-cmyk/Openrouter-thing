@@ -10,14 +10,17 @@ export default function AIWindow({window}:{window:any}){
   const [input, setInput] = useState(saved.draft || '')
   const [generating, setGenerating] = useState(false)
   const currentCancelRef = useRef<(()=>void)|null>(null)
+  const attachments = useSessionStore(s=>s.attachments)
+  const attach = useSessionStore(s=>s.attachFile)
+  const removeAttachment = useSessionStore(s=>s.removeAttachment)
 
   useEffect(()=>{
     // autosave on changes
     const timeout = setTimeout(()=>{
-      useSessionStore.getState().save(messages, input)
+      useSessionStore.getState().save(messages, input, attachments)
     }, 400)
     return ()=>clearTimeout(timeout)
-  }, [messages, input])
+  }, [messages, input, attachments])
 
   async function send(){
     if(!input) return
@@ -27,7 +30,9 @@ export default function AIWindow({window}:{window:any}){
     setGenerating(true)
 
     try{
-      const stream = await aiService.chatStream([{role:'system', content:'You are BananaRouter.'}, ...messages, userMsg])
+      // include minimal metadata about attachments in the system prompt
+      const contextNote = attachments.length? `Attached files: ${attachments.map(a=>a.name).join(', ')}` : ''
+      const stream = await aiService.chatStream([{role:'system', content:`You are BananaRouter. ${contextNote}`}, ...messages, userMsg])
       currentCancelRef.current = stream.cancel
       const reader = stream.getReader()
       let assistantText = ''
@@ -39,9 +44,7 @@ export default function AIWindow({window}:{window:any}){
         const chunk = new TextDecoder().decode(value)
         assistantText += chunk
         setMessages(prev=>{
-          // replace last assistant message
           const copy = [...prev]
-          // find last assistant placeholder index
           for(let i=copy.length-1;i>=0;i--){ if(copy[i].role==='assistant'){ copy[i] = {role:'assistant', content: assistantText}; break }}
           return copy
         })
@@ -62,9 +65,20 @@ export default function AIWindow({window}:{window:any}){
     }
   }
 
+  function onDrop(e:React.DragEvent){
+    e.preventDefault()
+    const dt = e.dataTransfer
+    if(!dt) return
+    const newFiles = Array.from(dt.files)
+    newFiles.forEach(f=>{
+      const fileObj = {id: Date.now()+Math.random(), name: f.name, size: f.size, type: f.type}
+      attach(fileObj)
+    })
+  }
+
   return (
     <Window window={window}>
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full" onDragOver={e=>e.preventDefault()} onDrop={onDrop}>
         <div className="flex-1 overflow-auto space-y-4 pr-4">
           {messages.length===0 && (
             <div className="text-neutral-400">What do you want to figure out?</div>
@@ -78,6 +92,14 @@ export default function AIWindow({window}:{window:any}){
           ))}
         </div>
         <div className="mt-2">
+          <div className="flex gap-2 mb-2">
+            {attachments.map((a:any)=> (
+              <div key={a.id} className="bg-neutral-700 px-2 py-1 rounded flex items-center gap-2">
+                <div className="text-sm">📄 {a.name}</div>
+                <button onClick={()=>removeAttachment(a.id)} className="text-xs text-neutral-200">✕</button>
+              </div>
+            ))}
+          </div>
           <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && !e.shiftKey){e.preventDefault(); send()}}} className="w-full bg-neutral-900 p-2 rounded h-24" placeholder="Ask BananaRouter..." />
           <div className="flex justify-between mt-2">
             <div className="flex gap-2">
