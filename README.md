@@ -1,1 +1,1 @@
-# Openrouter-thing
+VITE project for BananaRouter VM
